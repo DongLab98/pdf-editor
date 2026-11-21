@@ -1,9 +1,8 @@
 name: Windows 설치 파일 빌드
 
+# 자동 실행(push·태그) 끔: 배포본은 windows_build/ 방법으로 만들고 릴리스는 직접 올림.
+# 필요할 때 Actions 탭에서 수동으로만 실행.
 on:
-  push:
-    branches: [main, master]
-    tags: ["v*"]
   workflow_dispatch:
 
 permissions:

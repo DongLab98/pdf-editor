@@ -28,7 +28,7 @@
 
 ## 설치 파일 만들기
 
-이 폴더는 소스 코드입니다. 아래 두 방법 중 하나로 Windows 설치 파일(`PdfEditor_Setup_1.0.0.exe`)을 만듭니다.
+이 폴더는 소스 코드입니다. 아래 두 방법 중 하나로 Windows 설치 파일(`PdfEditor_Setup_2.4.0.exe`)을 만듭니다.
 
 ### 방법 A: Windows PC에서 직접 만들기 (권장)
 
@@ -36,7 +36,7 @@
 2. 이 폴더의 **`build_windows.bat`** 를 더블클릭합니다.
    - 필요한 라이브러리 설치 → 실행 파일 생성 → 설치 파일 생성까지 자동으로 진행됩니다. 처음 한 번은 5~10분쯤 걸립니다.
    - 설치 파일을 만드는 도구(Inno Setup)가 없으면 winget으로 자동 설치합니다.
-3. 작업이 끝나면 `installer_output` 폴더가 열립니다. **`PdfEditor_Setup_1.0.0.exe`** 를 실행해 설치하세요.
+3. 작업이 끝나면 `installer_output` 폴더가 열립니다. **`PdfEditor_Setup_2.4.0.exe`** 를 실행해 설치하세요.
 
 > 설치 파일 없이 바로 쓰려면 `dist\PdfEditor` 폴더를 통째로 복사해 `PdfEditor.exe` 를 실행하면 됩니다(포터블).
 

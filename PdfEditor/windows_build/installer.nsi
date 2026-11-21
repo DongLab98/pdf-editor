@@ -5,7 +5,7 @@ SetCompressorDictSize 64
 
 !define APPNAME "PDF 편집기"
 !define APPID "PdfEditorKR"
-!define VERSION "2.3.0"
+!define VERSION "2.4.0"
 !define EXE "PdfEditor.exe"
 !define UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPID}"
 
@@ -16,7 +16,7 @@ InstallDirRegKey HKLM "Software\${APPID}" "InstallDir"
 RequestExecutionLevel admin
 BrandingText "${APPNAME} ${VERSION}"
 
-VIProductVersion "2.3.0.0"
+VIProductVersion "2.4.0.0"
 VIAddVersionKey /LANG=1042 "ProductName" "${APPNAME}"
 VIAddVersionKey /LANG=1042 "FileDescription" "${APPNAME} 설치"
 VIAddVersionKey /LANG=1042 "FileVersion" "${VERSION}"

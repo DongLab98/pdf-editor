@@ -20,4 +20,4 @@ rm -rf dist && mkdir -p dist/PdfEditor/app && cp PdfEditor.exe dist/PdfEditor/ &
 cp -r "$ROOT/main.py" "$ROOT/pdfeditor" "$ROOT/tessdata" "$ROOT/assets" "$ROOT/README.md" dist/PdfEditor/app/
 # 5) 설치 파일
 mkdir -p out && cp "$HERE/installer.nsi" . && makensis installer.nsi
-echo "완료: $W/out/PdfEditor_Setup_1.0.0.exe"
+echo "완료: $W/out/PdfEditor_Setup_2.4.0.exe"

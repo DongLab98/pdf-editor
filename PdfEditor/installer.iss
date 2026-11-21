@@ -3,7 +3,7 @@
 ; 먼저 PyInstaller 로 dist\PdfEditor 폴더를 만들어 두어야 합니다.
 
 #define AppName "PDF 편집기"
-#define AppVersion "2.3.0"
+#define AppVersion "2.4.0"
 #define AppExe "PdfEditor.exe"
 
 [Setup]

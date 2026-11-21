@@ -56,7 +56,7 @@ if not defined ISCC (
 "%ISCC%" installer.iss || goto fail
 echo.
 echo ============================================================
-echo   완료!  installer_output 폴더의 PdfEditor_Setup_2.3.0.exe 를
+echo   완료!  installer_output 폴더의 PdfEditor_Setup_2.4.0.exe 를
 echo   실행하면 설치됩니다.
 echo ============================================================
 start "" "installer_output"

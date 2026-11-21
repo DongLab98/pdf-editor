@@ -296,5 +296,77 @@ class RecentListTest(Base):
         self.assertEqual(self.w.docs.count(), 1)
 
 
+# ----------------------------------------------------------------------------- 5. 리본 배치
+class RibbonLayoutTest(Base):
+    def test_ribbon_full_width_and_stable_when_document_opens(self):
+        self.assertIs(self.w.menuWidget(), self.w.ribbon, "리본은 도크 위 메뉴 위젯 자리에 있어야 함")
+        self.w.resize(1200, 800)
+        self.w.show()
+        APP.processEvents()
+        x0 = self.w.ribbon.mapTo(self.w, mainwindow.QPoint(0, 0)).x()
+        pdf = os.path.join(self.tmp, "r.pdf")
+        _make_pdf(pdf, ["ribbon"])
+        self.w.open_path(pdf)
+        APP.processEvents()
+        self.assertTrue(self.w.side_dock.isVisible())
+        self.assertEqual(self.w.ribbon.mapTo(self.w, mainwindow.QPoint(0, 0)).x(), x0,
+                         "문서를 열어도 리본이 옆으로 밀리면 안 됨")
+        self.assertEqual(x0, 0)
+        self.assertEqual(self.w.ribbon.width(), self.w.width())
+
+    def test_all_ribbon_pages_same_height(self):
+        hs = {self.w.ribbon_tabs.widget(i).height() for i in range(self.w.ribbon_tabs.count())}
+        self.assertEqual(len(hs), 1, f"탭마다 리본 높이가 다름: {hs}")
+
+
+# ----------------------------------------------------------------------------- 6. 좁은 창의 리본
+class RibbonAdaptTest(Base):
+    def test_groups_shrink_right_first_and_keep_all_commands(self):
+        from pdfeditor import ribbon
+        page = self.w.ribbon_scrolls[0].page
+        all_actions = {id(a) for g in page.groups for a in g.actions_in_order()}
+        page.fit(100000)                                 # 넓으면 모두 보통
+        self.assertTrue(all(g.mode == ribbon.MODE_FULL for g in page.groups))
+        widths = page._widths
+        full = page._overhead + sum(w[0] for w in widths)
+        page.fit(full - 60)                              # 조금 좁으면 오른쪽부터 줄어듦
+        modes = [g.mode for g in page.groups]
+        self.assertNotEqual(modes[-1], ribbon.MODE_FULL, f"맨 오른쪽 그룹부터 줄어야 함: {modes}")
+        self.assertEqual(modes[0], ribbon.MODE_FULL, f"왼쪽 그룹은 그대로여야 함: {modes}")
+        page.fit(10)                                     # 아주 좁으면 줄일 수 있는 그룹은 모두 접힘
+        for g in page.groups:
+            if g.can_shrink:
+                self.assertEqual(g.mode, ribbon.MODE_COLLAPSED)
+        reachable = {id(a) for g in page.groups if g.coll_btn is not None
+                     for a in g.coll_btn.menu().actions() if not a.isSeparator()}
+        self.assertEqual(reachable, all_actions, "접어도 모든 명령은 메뉴에서 쓸 수 있어야 함")
+
+    def test_group_with_widget_never_shrinks(self):
+        page = self.w.ribbon_scrolls[2].page            # 주석 탭: '스타일' 그룹에 굵기 콤보 상자
+        style = next(g for g in page.groups if g.title == "스타일")
+        self.assertFalse(style.can_shrink)
+        page.fit(10)
+        self.assertEqual(style.mode, 0)
+
+    def test_minimize_ribbon_toggle_and_persist(self):
+        self.w.resize(1200, 800)
+        self.w.show()
+        APP.processEvents()
+        h_full = self.w.ribbon.sizeHint().height()
+        self.w.a_ribbon_min.trigger()                    # Ctrl+F1 과 같은 동작
+        APP.processEvents()
+        self.assertTrue(self.w.a_ribbon_min.isChecked())
+        self.assertLess(self.w.ribbon.sizeHint().height(), h_full - 50)
+        self.assertTrue(self.w.settings.value("ribbon_min", False, type=bool))
+        self.w._ribbon_tab_clicked(1)                    # 접힌 상태에서 탭을 누르면 펼침
+        self.w._ribbon_tab_double_clicked(1)             # 같은 두 번 클릭의 두 번째 신호는 다시 접지 않음
+        APP.processEvents()
+        self.assertFalse(self.w.a_ribbon_min.isChecked())
+        self.assertEqual(self.w.ribbon.sizeHint().height(), h_full)
+        self.w._ribbon_just_expanded = False
+        self.w._ribbon_tab_double_clicked(1)             # 펼친 상태에서 두 번 클릭 → 접기
+        self.assertTrue(self.w.a_ribbon_min.isChecked())
+
+
 if __name__ == "__main__":
     unittest.main()

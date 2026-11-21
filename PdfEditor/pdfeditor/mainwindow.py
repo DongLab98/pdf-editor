@@ -400,7 +400,8 @@ class MainWindow(QMainWindow):
         cl = QVBoxLayout(central)
         cl.setContentsMargins(0, 0, 0, 0)
         cl.setSpacing(0)
-        cl.addWidget(self.ribbon)
+        # 리본은 메뉴 위젯 자리(도크 영역보다 위)에 둠 → 창 전체 폭, 문서를 열어 왼쪽 패널이 생겨도 버튼이 움직이지 않음
+        self.setMenuWidget(self.ribbon)
         cl.addWidget(self.stack, 1)
         self.ad_strip = ads.AdStrip()
         self.ad_strip.setVisible(False)
@@ -429,6 +430,8 @@ class MainWindow(QMainWindow):
         self._font_timer.start(300)
         self.side_dock.setFixedWidth(186)
         self._shown_once = False
+        if self.settings.value("ribbon_min", False, type=bool):
+            self.set_ribbon_minimized(True)
 
     # ================================================================ 구성
     def _act(self, text, slot, icon=None, shortcut=None, tip=None, checkable=False):
@@ -548,6 +551,8 @@ class MainWindow(QMainWindow):
         self.a_line.setChecked(self.line_mode)
         self.a_panel = A("패널", lambda on: self.side_dock.setVisible(on), None, "F4", "페이지·책갈피 패널 보이기", True)
         self.a_panel.setChecked(True)
+        self.a_ribbon_min = A("리본 접기", self.set_ribbon_minimized, None, "Ctrl+F1",
+                              "리본을 탭 이름만 남기고 접습니다 (탭을 두 번 클릭해도 됨)", True)
         self.a_redo.setShortcuts([QKeySequence("Ctrl+Y"), QKeySequence("Ctrl+Shift+Z")])
         self.a_zoom_in.setShortcuts([QKeySequence("Ctrl++"), QKeySequence("Ctrl+=")])
         self.a_zoom_out.setShortcuts([QKeySequence("Ctrl+-")])
@@ -555,7 +560,8 @@ class MainWindow(QMainWindow):
                               None, "Ctrl+0", "실제 크기")
         self._apply_icons()
         self.doc_actions = [a for a in self.__dict__.values() if isinstance(a, QAction) and a not in (
-            self.a_open, self.a_new, self.a_merge, self.a_from_img, self.a_from_office, self.a_help, self.a_about)]
+            self.a_open, self.a_new, self.a_merge, self.a_from_img, self.a_from_office, self.a_help, self.a_about,
+            self.a_ribbon_min)]  # 리본 접기는 문서가 없어도 쓸 수 있어야 함
 
     def _apply_icons(self):
         T = theme
@@ -574,7 +580,7 @@ class MainWindow(QMainWindow):
             "a_compress": "file-archive", "a_meta": "info", "a_ocr_page": ("scan-text", T.ACCENT),
             "a_ocr_all": "scan-line", "a_page_text": "file-search", "a_compare": "git-compare",
             "a_bm_add": "bookmark-plus", "a_zoom_in": "zoom-in", "a_zoom_out": "zoom-out",
-            "a_fit_w": "move-horizontal", "a_fit_p": "maximize", "a_cont": "rows-3", "a_full": "maximize-2",
+            "a_fit_w": "move-horizontal", "a_fit_p": "maximize", "a_cont": "rows-3", "a_full": "maximize-2", "a_ribbon_min": "panel-top",
             "a_prev": "chevron-left", "a_next": "chevron-right", "a_first": "chevrons-left",
             "a_last": "chevrons-right", "a_help": "circle-help", "a_about": "info", "a_blog": "book-open", "a_para": "pilcrow",
             "a_line": "wrap-text", "a_panel": "panel-left", "a_select_all": "text-cursor",
@@ -666,14 +672,28 @@ class MainWindow(QMainWindow):
             ("도구", [("문자인식", [self.a_ocr_page, self.a_ocr_all, self.a_page_text]),
                     ("비교·탐색", [self.a_compare, self.a_bm_add])]),
             ("보기", [("확대/축소", [self.a_zoom_in, self.a_zoom_out, [self.a_fit_w, self.a_fit_p]]),
-                    ("화면", [self.a_cont, self.a_full, self.a_panel])]),
+                    ("화면", [self.a_cont, self.a_full, self.a_panel, self.a_ribbon_min])]),
         ]
+        scrolls = []
         for name, groups in pages:
             pg = RibbonPage()
             for title, items in groups:
                 pg.add_group(title, items)
             pg.finish()
-            self.ribbon_tabs.addTab(scrollable(pg), name)
+            sa = scrollable(pg)
+            scrolls.append(sa)
+            self.ribbon_tabs.addTab(sa, name)
+        # 모든 탭의 리본 높이를 같게 → 탭을 바꿔도 그룹 이름 줄과 문서 영역 위치가 그대로
+        ribbon_h = max(sa.height() for sa in scrolls)
+        for sa in scrolls:
+            sa.setFixedHeight(ribbon_h)
+        self.ribbon_scrolls = scrolls
+        # 탭을 바꾸면 그 탭의 그룹 모양을 지금 폭에 맞춤 / 접힌 리본은 탭을 누르면 펼침, 두 번 누르면 접기·펼치기
+        self.ribbon_tabs.currentChanged.connect(lambda i: 0 <= i < len(scrolls) and scrolls[i].refit())
+        self._ribbon_min = False
+        self._ribbon_just_expanded = False
+        self.ribbon_tabs.tabBarClicked.connect(self._ribbon_tab_clicked)
+        self.ribbon_tabs.tabBarDoubleClicked.connect(self._ribbon_tab_double_clicked)
         self.file_btn = QToolButton()
         self.file_btn.setObjectName("FileButton")
         self.file_btn.setText("파일")
@@ -935,7 +955,7 @@ class MainWindow(QMainWindow):
         m.addSeparator()
         m.addAction(theme.icon("log-out"), "끝내기", self.close, QKeySequence("Ctrl+Q"))
         self.file_btn.setMenu(m)
-        self.menuBar().hide()
+        # menuBar() 를 부르면 메뉴 위젯 자리의 리본이 메뉴 막대로 바뀌므로 호출하지 않음 (메뉴는 [파일] 버튼에 있음)
         self._update_recent()
 
     def showEvent(self, ev):
@@ -1445,6 +1465,36 @@ class MainWindow(QMainWindow):
             v.continuous = on
             v._apply_mode()
             v.goto(v.cur)
+
+    # ---- 리본 접기 (Office 와 같은 동작: 탭 두 번 클릭 / Ctrl+F1)
+    def set_ribbon_minimized(self, on: bool):
+        on = bool(on)
+        self._ribbon_min = on
+        # QTabWidget 은 숨긴 페이지 자리도 남기므로, 접을 때는 높이를 탭 줄 높이로 제한
+        stack = self.ribbon_tabs.findChild(QStackedWidget)
+        if stack is not None:
+            stack.setVisible(not on)
+        bar_h = max(self.ribbon_tabs.tabBar().sizeHint().height(), self.file_btn.sizeHint().height(),
+                    self.find_edit.sizeHint().height())  # 탭 줄 양옆의 [파일] 버튼·찾기 상자도 잘리지 않게
+        self.ribbon_tabs.setMaximumHeight(bar_h + 2 if on else 16777215)
+        self.a_ribbon_min.blockSignals(True)
+        self.a_ribbon_min.setChecked(on)
+        self.a_ribbon_min.blockSignals(False)
+        self.settings.setValue("ribbon_min", on)
+
+    def _ribbon_tab_clicked(self, _idx):
+        if self._ribbon_min:
+            self.set_ribbon_minimized(False)
+            # 같은 두 번 클릭의 두 번째 신호가 바로 다시 접지 않도록 잠깐 표시
+            self._ribbon_just_expanded = True
+            QTimer.singleShot(QApplication.doubleClickInterval(),
+                              lambda: setattr(self, "_ribbon_just_expanded", False))
+
+    def _ribbon_tab_double_clicked(self, _idx):
+        if self._ribbon_just_expanded:
+            self._ribbon_just_expanded = False
+            return
+        self.set_ribbon_minimized(not self._ribbon_min)
 
     def toggle_fullscreen(self):
         if self.isFullScreen():

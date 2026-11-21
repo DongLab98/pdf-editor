@@ -142,6 +142,7 @@ class DocView(QWidget):
         self.cur = 0
         self.canvases: list[PageCanvas] = []
         self.search_hits, self.search_idx, self.last_q = [], -1, None
+        self.search_rev = -1   # 찾기 결과를 계산했을 때의 pdf.revision
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
@@ -191,8 +192,23 @@ class DocView(QWidget):
         return name + (" *" if self.pdf.dirty else "")
 
     # ---- 페이지 위젯
+    def clear_search(self):
+        """찾기 결과와 강조 표시를 지움."""
+        self.search_hits, self.search_idx, self.last_q = [], -1, None
+        self.search_rev = -1
+        for c in self.canvases:
+            if c.highlights:
+                c.highlights = []
+                c.update()
+
+    def _drop_stale_search(self):
+        """문서가 바뀐 뒤에는 예전 찾기 결과(페이지 번호·위치)를 쓰지 않음."""
+        if self.search_hits and self.search_rev != self.pdf.revision:
+            self.clear_search()
+
     def rebuild(self):
         self.main.commit_inline()
+        self._drop_stale_search()
         for c in self.canvases:
             c.setParent(None)
             c.deleteLater()
@@ -211,6 +227,7 @@ class DocView(QWidget):
         self._lazy.start()
 
     def refresh_pages(self, pages=None):
+        self._drop_stale_search()
         pages = range(len(self.canvases)) if pages is None else pages
         for p in pages:
             if 0 <= p < len(self.canvases):
@@ -740,8 +757,8 @@ class MainWindow(QMainWindow):
         self.recent_list.setObjectName("RecentList")
         self.recent_list.setFixedSize(790, 196)
         self.recent_list.setIconSize(QSize(20, 20))
-        self.recent_list.itemActivated.connect(lambda it: self.open_path(it.data(Qt.UserRole)))
-        self.recent_list.itemDoubleClicked.connect(lambda it: self.open_path(it.data(Qt.UserRole)))
+        self.recent_list.itemActivated.connect(self._open_recent_item)
+        self.recent_list.itemDoubleClicked.connect(self._open_recent_item)
         rv.addWidget(self.recent_list)
         rl.addLayout(rv)
         rl.addStretch()
@@ -757,6 +774,12 @@ class MainWindow(QMainWindow):
         outer.addLayout(col)
         outer.addStretch(2)
         return w
+
+    def _open_recent_item(self, it):
+        """시작 화면의 최근 파일 항목 열기. 항목이 없거나(None) '최근 파일 없음' 안내 줄이면 무시."""
+        path = it.data(Qt.UserRole) if it is not None else None
+        if path:
+            self.open_path(path)
 
     def _sync_links(self):
         on = bool(ads.manager().link("blog"))
@@ -1068,7 +1091,8 @@ class MainWindow(QMainWindow):
             return
         for i in range(self.docs.count()):
             w = self.docs.widget(i)
-            if isinstance(w, DocView) and w.pdf.path and os.path.normcase(w.pdf.path) == os.path.normcase(path):
+            if isinstance(w, DocView) and any(p and os.path.normcase(p) == os.path.normcase(path)
+                                              for p in (w.pdf.path, w.pdf.source_path)):
                 self.docs.setCurrentIndex(i)
                 return
         pdf = PdfDocument()
@@ -1143,7 +1167,8 @@ class MainWindow(QMainWindow):
         v = self.view
         if not v:
             return False
-        if not v.pdf.path or os.path.splitext(v.pdf.path)[1].lower() in IMAGE_EXTS:
+        # 이미지에서 만든 문서는 같은 이름의 PDF 를 몰래 덮어쓰지 않도록 항상 '다른 이름으로 저장'
+        if not v.pdf.path or v.pdf.needs_save_as or os.path.splitext(v.pdf.path)[1].lower() in IMAGE_EXTS:
             return self.save_as()
         if v.pdf.was_encrypted:
             r = QMessageBox.question(self, "저장", "원본은 암호가 걸린 문서입니다. 암호 없이 저장할까요?\n"
@@ -1532,17 +1557,25 @@ class MainWindow(QMainWindow):
         super().keyPressEvent(ev)
 
     # ================================================================ 실행 래퍼
-    def _do(self, pno, fn, label=""):
+    def _do(self, pno, fn, label="", view=None):
+        """view: 작업 대상 문서 탭 (생략하면 현재 탭). 인라인 편집은 탭이 바뀐 뒤에 적용될 수 있어 직접 넘김."""
         self.commit_inline()
-        v = self.view
+        v = view or self.view
         try:
             res = fn()
         except Exception as e:
             self._error(f"{label} 실패" if label else "오류", e)
             return None
+        if v is None:
+            return res
         v.refresh_pages([pno] if pno is not None else None)
-        for p in ([pno] if pno is not None else range(v.pdf.page_count)):
-            self._queue_thumb(p)
+        if v is self.view:  # 썸네일 패널은 현재 탭만 보여 줌
+            for p in ([pno] if pno is not None else range(v.pdf.page_count)):
+                self._queue_thumb(p)
+        else:
+            idx = self.docs.indexOf(v)
+            if idx >= 0:
+                self.docs.setTabText(idx, v.title)
         self._update_enabled()
         if label:
             self.statusBar().showMessage(f"{label} 완료", 3000)
@@ -2400,9 +2433,11 @@ class MainWindow(QMainWindow):
         q = self.find_edit.text().strip()
         if not v or not q:
             return
-        if v.last_q != q or not v.search_hits:
+        if v.last_q != q or not v.search_hits or v.search_rev != v.pdf.revision:
             v.last_q = q
-            v.search_hits = self._busy(v.pdf.search, q)
+            # 페이지 수가 바뀌었을 수도 있으니 지금 있는 페이지의 결과만 사용
+            v.search_hits = [(p, r) for p, r in self._busy(v.pdf.search, q) if p < len(v.canvases)]
+            v.search_rev = v.pdf.revision
             v.search_idx = -1
             for c in v.canvases:
                 c.highlights = []

@@ -11,7 +11,7 @@ import pymupdf
 from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRect, Qt, QTimer, Signal
 from PySide6.QtGui import (QColor, QFont, QFontDatabase, QFontMetricsF, QImage, QPalette, QPixmap, QTextBlockFormat,
                            QTextCursor, QTextOption)
-from PySide6.QtWidgets import (QButtonGroup, QComboBox, QCompleter, QFrame, QHBoxLayout, QTextEdit,
+from PySide6.QtWidgets import (QApplication, QButtonGroup, QComboBox, QCompleter, QFrame, QHBoxLayout, QTextEdit,
                                QToolButton)
 
 from . import fontmgr, theme
@@ -576,12 +576,17 @@ class InlineTextSession(QObject):
         chain, sb, si = self.chain, self.synth_b, self.synth_i
         item, fill, color, ul = self.item, self.fill, b.color.rgb, b.u.isChecked()
         self._close(True)
+        # view=self.view: 탭을 바꾸는 순간 적용돼도 편집한 문서의 탭을 다시 그림
         res = self.main._do(self.pno, lambda: self.pdf.write_paragraph(
             self.pno, item, lines, origin=origin, box_width=box_w, chain=chain, size=size, color=color, pitch=pitch,
             align=align, direction=direction, synth_bold=sb, synth_italic=si, underline=ul, fill=fill,
-            first_indent=indent0), "텍스트 수정" if item is not None else "텍스트 추가")
+            first_indent=indent0), "텍스트 수정" if item is not None else "텍스트 추가", view=self.view)
         if res is not None:
             self.main.statusBar().showMessage(f"사용 글꼴: {res.chain_desc}", 6000)
+        else:
+            # 쓰기에 실패하면 문서는 되돌려지고, 입력한 글자는 잃지 않도록 클립보드에 남김
+            QApplication.clipboard().setText(text)
+            self.main.statusBar().showMessage("적용하지 못했습니다. 입력한 글자는 클립보드에 복사했습니다.", 10000)
 
     def cancel(self):
         self._close(False)

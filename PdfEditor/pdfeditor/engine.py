@@ -122,10 +122,16 @@ class PdfDocument(AnnotMixin):
         self._text_cache: dict = {}
         self.was_encrypted = False
         self._words_cache: dict = {}
+        self.source_path: str | None = None   # 실제로 연 파일 (이미지를 열었으면 그 이미지 경로)
+        self.needs_save_as = False            # 이미지에서 만든 문서: 첫 저장은 반드시 '다른 이름으로 저장'
+        self.revision = 0                     # 문서가 바뀔 때마다 증가 (찾기 결과 등 무효화용)
+        self._dirty_before_snapshot = False
+        self._evicted_undo: bytes | None = None
 
     # ------------------------------------------------------------------ 파일
     def open(self, path: str, password: str | None = None):
         ext = os.path.splitext(path)[1].lower()
+        source = path
         with open(path, "rb") as f:
             data = f.read()
         if ext in IMAGE_EXTS:
@@ -142,6 +148,8 @@ class PdfDocument(AnnotMixin):
             doc = pymupdf.open("pdf", doc.tobytes(encryption=pymupdf.PDF_ENCRYPT_NONE))
         self._set_doc(doc)
         self.path = path
+        self.source_path = source
+        self.needs_save_as = ext in IMAGE_EXTS
         self.undo_stack.clear()
         self.redo_stack.clear()
         self.dirty = ext in IMAGE_EXTS
@@ -151,6 +159,8 @@ class PdfDocument(AnnotMixin):
         doc.new_page(width=595, height=842)
         self._set_doc(doc)
         self.path = None
+        self.source_path = None
+        self.needs_save_as = False
         self.dirty = True
 
     def _set_doc(self, doc):
@@ -160,6 +170,7 @@ class PdfDocument(AnnotMixin):
             except Exception:
                 pass
         self.doc = doc
+        self.revision += 1
         self._text_cache.clear()
         self._words_cache = {}
         if self.embedded is None:
@@ -204,17 +215,31 @@ class PdfDocument(AnnotMixin):
         os.replace(tmp, path)
         if encrypt is None and compress is None:
             self.path = path
+            # source_path 는 그대로 둠: 이미지에서 만든 문서는 원본 이미지를 다시 열 때 같은 탭으로 가야 함
+            self.needs_save_as = False
             self.dirty = False
 
     # ------------------------------------------------------------- 실행 취소
     def snapshot(self):
         self._words_cache = {}
         self.undo_stack.append(self.doc.tobytes())
-        if len(self.undo_stack) > MAX_UNDO:
-            self.undo_stack.pop(0)
+        # 가득 차서 밀려난 가장 오래된 기록은 되돌리기(_rollback_snapshot)를 위해 잠시 보관
+        self._evicted_undo = self.undo_stack.pop(0) if len(self.undo_stack) > MAX_UNDO else None
         self.redo_stack.clear()
+        self._dirty_before_snapshot = self.dirty
         self.dirty = True
+        self.revision += 1
         self._text_cache.clear()
+
+    def _rollback_snapshot(self):
+        """방금 찍은 스냅샷으로 문서를 되돌림 (작업 도중 실패했을 때). 실행 취소 기록도 하나 줄어듦."""
+        if not self.undo_stack:
+            return
+        self._set_doc(pymupdf.open("pdf", self.undo_stack.pop()))
+        if self._evicted_undo is not None:
+            self.undo_stack.insert(0, self._evicted_undo)
+            self._evicted_undo = None
+        self.dirty = self._dirty_before_snapshot
 
     def undo(self):
         if not self.undo_stack:
@@ -517,23 +542,28 @@ class PdfDocument(AnnotMixin):
                         first_indent=0.0) -> EditResult:
         """줄 목록(이미 줄바꿈된)을 정렬·줄간격·서식대로 씀. item 이 있으면 원래 글자를 지우고 그 자리에."""
         self.snapshot()
-        page = self.doc[pno]
-        if item is not None:
-            self._remove_item(page, item, fill)
-        offsets = []
-        plan = chain.plan("".join(lines))
-        for i, ln in enumerate(lines):
-            w = fontmgr.text_width(ln, chain, size, plan)
-            if align == "center":
-                offsets.append((box_width - w) / 2)
-            elif align == "right":
-                offsets.append(box_width - w)
-            else:
-                offsets.append(first_indent if i == 0 else 0.0)
-        if any(ln.strip() for ln in lines):
-            fontmgr.write_block(page, origin, lines, chain, size, color, direction, pitch, offsets,
-                                synth_bold, synth_italic, underline,
-                                justify_width=box_width if align == "justify" else None)
+        try:
+            page = self.doc[pno]
+            if item is not None:
+                self._remove_item(page, item, fill)
+            offsets = []
+            plan = chain.plan("".join(lines))
+            for i, ln in enumerate(lines):
+                w = fontmgr.text_width(ln, chain, size, plan)
+                if align == "center":
+                    offsets.append((box_width - w) / 2)
+                elif align == "right":
+                    offsets.append(box_width - w)
+                else:
+                    offsets.append(first_indent if i == 0 else 0.0)
+            if any(ln.strip() for ln in lines):
+                fontmgr.write_block(page, origin, lines, chain, size, color, direction, pitch, offsets,
+                                    synth_bold, synth_italic, underline,
+                                    justify_width=box_width if align == "justify" else None)
+        except BaseException:
+            # 원래 글자만 지워지고 새 글자는 못 쓴 상태로 남지 않게 되돌림
+            self._rollback_snapshot()
+            raise
         self._text_cache.clear()
         return EditResult(chain.describe("".join(lines)))
 

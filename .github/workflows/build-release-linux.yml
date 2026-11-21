@@ -1,0 +1,53 @@
+name: 배포 파일 빌드 (Linux · build_on_linux.sh)
+
+# 실제 배포본을 만든 방법(PdfEditor/windows_build/build_on_linux.sh + fetch.py)을 Ubuntu 에서 그대로 실행합니다.
+# 수동 실행만 가능하며, 결과는 아티팩트로만 올립니다(릴리스는 바꾸지 않음).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 빌드 도구 설치 (mingw, nsis, zstandard)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64 nsis zip
+          python3 -m venv /tmp/venv
+          echo "/tmp/venv/bin" >> "$GITHUB_PATH"
+          /tmp/venv/bin/pip install --quiet zstandard
+          ls /usr/share/nsis/Stubs
+
+      - name: build_on_linux.sh 실행 (fetch.py 로 Windows 용 Python 3.12 받기 포함)
+        run: bash PdfEditor/windows_build/build_on_linux.sh
+
+      - name: Portable · Source zip 만들기
+        run: |
+          set -e
+          W=PdfEditor/_winbuild
+          V=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' PdfEditor/pdfeditor/__init__.py)
+          # 이전 배포본처럼 .pyc 를 미리 만들어 둠 (Program Files 는 쓰기 금지라 실행할 때마다 다시 컴파일하지 않도록)
+          python3 --version
+          python3 -m compileall -q "$W/dist/PdfEditor/runtime/Lib" || true
+          python3 -m compileall -q -b "$W/dist/PdfEditor/app"
+          python3 -m compileall -q "$W/dist/PdfEditor/app"
+          # .pyc 를 넣은 dist 로 설치 파일을 다시 만듦 (build_on_linux.sh 5) 단계와 같은 명령)
+          (cd "$W" && makensis installer.nsi)
+          mkdir -p release
+          cp "$W/out/PdfEditor_Setup_$V.exe" release/
+          (cd "$W/dist" && zip -qr9 "$GITHUB_WORKSPACE/release/PdfEditor_Portable_$V.zip" PdfEditor)
+          git archive --format=zip -9 -o "release/PdfEditor_Source_$V.zip" HEAD PdfEditor
+          ls -la release
+          sha256sum release/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PdfEditor-release
+          path: release/*
+          retention-days: 7
+          compression-level: 0

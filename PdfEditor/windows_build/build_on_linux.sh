@@ -7,9 +7,10 @@ mkdir -p "$W/pkgs" && cd "$W"
 # 1) conda-forge 에서 Windows용 Python 3.12 런타임
 curl -s -o /tmp/win64_current.json https://conda.anaconda.org/conda-forge/win-64/current_repodata.json
 cp "$HERE/fetch.py" . && python3 fetch.py   # py/ 에 압축 해제 (libpython 은 python 과 같은 버전으로 맞출 것)
-# 2) Windows용 라이브러리 (PySide6-Essentials, PyMuPDF, fonttools, Pillow)
+# 2) Windows용 라이브러리 (PySide6-Essentials, PyMuPDF, fonttools, Pillow + requirements.txt 의 변환 기능용 패키지)
 pip install --target py/Lib/site-packages --platform win_amd64 --python-version 3.12 \
-    --implementation cp --only-binary=:all: --no-compile PySide6-Essentials PyMuPDF fonttools Pillow
+    --implementation cp --only-binary=:all: --no-compile PySide6-Essentials PyMuPDF fonttools Pillow \
+    pdf2docx python-docx openpyxl python-pptx "numpy<2" "opencv-python-headless<4.11"
 # (불필요한 Qt 모듈/PyMuPDF 부가 패키지 삭제는 README 참고)
 # 3) 실행 파일(런처)
 cp "$ROOT/assets/icon.ico" . && cp "$HERE/res.rc" "$HERE/launcher.c" .

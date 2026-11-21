@@ -11,7 +11,7 @@ from PySide6.QtGui import (QAction, QActionGroup, QColor, QDesktopServices, QFon
 from PySide6.QtWidgets import (QAbstractItemView, QFrame, QSlider, QApplication, QColorDialog, QComboBox, QDockWidget,
                                QFileDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
                                QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QProgressDialog,
-                               QPushButton, QScrollArea, QStackedWidget, QTabWidget,
+                               QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QStatusBar, QTabWidget,
                                QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from . import __version__, ads, convert, fontmgr, theme, tools
@@ -67,6 +67,53 @@ C_FILE, C_EDIT, C_ANNOT, C_PAGE, C_CONV, C_SEC, C_TOOL, C_VIEW = (
 
 
 # =============================================================================== 작은 위젯
+class ElidingStatusBar(QStatusBar):
+    """긴 임시 메시지가 오른쪽 고정 위젯과 겹치거나 글자 중간에서 잘리지 않게 '…'로 줄임 (전체 문장은 툴팁)."""
+
+    def showMessage(self, text, timeout=0):
+        self._full = text or ""
+        super().showMessage(self._elided(self._full), timeout)
+        self.setToolTip(self._full if self._full and self._elided(self._full) != self._full else "")
+
+    def addPermanentWidget(self, w, stretch=0):
+        self.__dict__.setdefault("_perm", []).append(w)
+        super().addPermanentWidget(w, stretch)
+
+    def _elided(self, text):
+        used = sum(w.sizeHint().width() + 6 for w in self.__dict__.get("_perm", []) if not w.isHidden())
+        avail = max(60, self.width() - used - 24)
+        return self.fontMetrics().elidedText(text, Qt.ElideRight, avail)
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        if getattr(self, "_full", "") and self.currentMessage():
+            super().showMessage(self._elided(self._full))
+
+
+class ElideLabel(QLabel):
+    """상태 표시줄 왼쪽 안내 글(마우스 위치 정보). 공간이 모자라면 '…'로 줄이고 전체는 툴팁."""
+
+    def __init__(self):
+        super().__init__()
+        self.setObjectName("StatusLabel")
+        self._full = ""
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.setMinimumWidth(40)
+
+    def setText(self, text):
+        self._full = text or ""
+        self._refresh()
+
+    def _refresh(self):
+        shown = self.fontMetrics().elidedText(self._full, Qt.ElideRight, max(10, self.width() - 6))
+        super().setText(shown)
+        self.setToolTip(self._full if shown != self._full else "")
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._refresh()
+
+
 class PageBox(QLineEdit):
     """현재 페이지 번호 입력칸 (QSpinBox 와 같은 사용법)."""
     from PySide6.QtCore import Signal as _Signal
@@ -569,18 +616,19 @@ class MainWindow(QMainWindow):
             "a_open": "folder-open", "a_new": "file-plus", "a_save": "save", "a_save_as": "save-all",
             "a_print": "printer", "a_undo": "undo-2", "a_redo": "redo-2", "a_copy": "copy", "a_cut": "scissors",
             "a_paste": "clipboard-paste", "a_find": "search", "a_close": "x",
-            "a_sign": ("signature", "#1d4ed8"), "a_stamp": ("stamp", T.C_RED), "a_del_annots": ("trash-2", T.C_RED),
+            # 색 규칙: 파일 형식(워드·엑셀·PPT·문서)만 그 프로그램 색, 되돌릴 수 없는 삭제만 빨강, 나머지는 모두 회색
+            "a_sign": "signature", "a_stamp": "stamp", "a_del_annots": ("trash-2", T.C_RED),
             "a_flatten": "layers", "a_rot_l": "rotate-ccw", "a_rot_r": "rotate-cw", "a_ins_blank": "file-plus-2",
             "a_ins_file": "file-input", "a_del_page": ("file-minus", T.C_RED), "a_extract": "file-output",
             "a_split": "split", "a_merge": "merge", "a_pnum": "list-ordered", "a_hf": "panel-top", "a_wm": "droplet",
             "a_to_word": ("file-text", T.C_WORD), "a_to_excel": ("file-spreadsheet", T.C_EXCEL),
-            "a_to_ppt": ("presentation", T.C_PPT), "a_to_img": ("file-image", "#7c3aed"), "a_to_txt": "file-type",
-            "a_from_img": ("images", "#7c3aed"), "a_from_office": ("file-symlink", T.C_WORD),
-            "a_extract_img": "image-down", "a_encrypt": ("lock", T.C_AMBER), "a_decrypt": "lock-open",
-            "a_compress": "file-archive", "a_meta": "info", "a_ocr_page": ("scan-text", T.ACCENT),
+            "a_to_ppt": ("presentation", T.C_PPT), "a_to_img": "file-image", "a_to_txt": "file-type",
+            "a_from_img": "images", "a_from_office": ("file-symlink", T.C_WORD),
+            "a_extract_img": "image-down", "a_encrypt": "lock", "a_decrypt": "lock-open",
+            "a_compress": "file-archive", "a_meta": "info", "a_ocr_page": "scan-text",
             "a_ocr_all": "scan-line", "a_page_text": "file-search", "a_compare": "git-compare",
             "a_bm_add": "bookmark-plus", "a_zoom_in": "zoom-in", "a_zoom_out": "zoom-out",
-            "a_fit_w": "move-horizontal", "a_fit_p": "maximize", "a_cont": "rows-3", "a_full": "maximize-2", "a_ribbon_min": "panel-top",
+            "a_fit_w": "move-horizontal", "a_fit_p": "maximize", "a_cont": "rows-3", "a_full": "maximize-2", "a_ribbon_min": "chevron-up",
             "a_prev": "chevron-left", "a_next": "chevron-right", "a_first": "chevrons-left",
             "a_last": "chevrons-right", "a_help": "circle-help", "a_about": "info", "a_blog": "book-open", "a_para": "pilcrow",
             "a_line": "wrap-text", "a_panel": "panel-left", "a_select_all": "text-cursor",
@@ -591,9 +639,10 @@ class MainWindow(QMainWindow):
                 continue
             name, color = (spec, T.INK_SOFT) if isinstance(spec, str) else spec
             a.setIcon(T.icon(name, color))
-        tools_icons = {TOOL_HAND: "hand", TOOL_SELECT_TEXT: "text-cursor", TOOL_SELECT: ("square-pen", T.ACCENT),
+        # 도구도 모두 회색: 파란색은 '선택된 도구' 표시(체크 상태)에만 쓰여야 켜진 것으로 오해하지 않음
+        tools_icons = {TOOL_HAND: "hand", TOOL_SELECT_TEXT: "text-cursor", TOOL_SELECT: "square-pen",
                        TOOL_ADD_TEXT: "type", TOOL_ADD_IMAGE: "image-plus", TOOL_ERASE: "eraser", TOOL_LINK: "link",
-                       TOOL_HIGHLIGHT: ("highlighter", T.C_AMBER), TOOL_UNDERLINE: "underline",
+                       TOOL_HIGHLIGHT: "highlighter", TOOL_UNDERLINE: "underline",
                        TOOL_STRIKE: "strikethrough", TOOL_NOTE: "message-square-text", TOOL_PEN: "pen-line",
                        TOOL_RECT: "square", TOOL_ELLIPSE: "circle", TOOL_LINE: "minus", TOOL_ARROW: "move-up-right"}
         for t, spec in tools_icons.items():
@@ -823,7 +872,8 @@ class MainWindow(QMainWindow):
         self.thumbs.setFlow(QListWidget.TopToBottom)
         self.thumbs.setWrapping(False)
         self.thumbs.setResizeMode(QListWidget.Adjust)
-        self.thumbs.setGridSize(QSize(170, 192))
+        self.thumbs.setGridSize(QSize(150, 192))  # 패널 폭(약 176~186px) 안에 들어가게 → 가로 스크롤 막대가 생기지 않음
+        self.thumbs.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.thumbs.setMovement(QListWidget.Snap)
         self.thumbs.setDragDropMode(QAbstractItemView.InternalMove)
         self.thumbs.setSelectionMode(QAbstractItemView.ExtendedSelection)
@@ -859,6 +909,9 @@ class MainWindow(QMainWindow):
         self.side_tabs = QTabWidget()
         self.side_tabs.setDocumentMode(True)
         self.side_tabs.tabBar().setExpanding(True)
+        # 좁아져도 탭 이름이 '책…'처럼 잘리거나 스크롤 화살표가 생기지 않게
+        self.side_tabs.tabBar().setUsesScrollButtons(False)
+        self.side_tabs.tabBar().setElideMode(Qt.ElideNone)
         self.side_tabs.setIconSize(QSize(15, 15))
         self.side_tabs.addTab(self.thumbs, theme.icon("files", theme.INK_SOFT), "페이지")
         self.side_tabs.addTab(bw, theme.icon("bookmark", theme.INK_SOFT), "책갈피")
@@ -880,10 +933,12 @@ class MainWindow(QMainWindow):
         self.thumb_dock = self.bm_dock = self.side_dock
 
     def _build_statusbar(self):
+        self.setStatusBar(ElidingStatusBar(self))
         sb = self.statusBar()
         sb.setSizeGripEnabled(False)
-        self.status_label = QLabel()
+        self.status_label = ElideLabel()
         sb.addWidget(self.status_label, 1)
+        # 글꼴 색인 상태는 불러오는 동안만 보여 주고, 끝나면 숨김 (개수는 툴팁으로)
         self.font_status = QLabel("글꼴 불러오는 중…")
         sb.addPermanentWidget(self.font_status)
 
@@ -900,9 +955,13 @@ class MainWindow(QMainWindow):
         self.page_spin = PageBox()
         self.page_spin.valueChanged.connect(lambda v: self.view and self.view.goto(v - 1))
         self.page_total = QLabel("/ 0")
+        # "/ 9999" 폭으로 고정: 남는 공간이 페이지 수 글자로 가서 ›·» 가 멀리 떨어지지 않게
+        self.page_total.setFixedWidth(self.page_total.fontMetrics().horizontalAdvance("/ 9999") + 6)
         for w in (tb(self.a_first), tb(self.a_prev), self.page_spin, self.page_total, tb(self.a_next), tb(self.a_last)):
             nl.addWidget(w)
+        nav.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
         sb.addPermanentWidget(nav)
+        self.status_nav = nav
         zw = QWidget()
         zl = QHBoxLayout(zw)
         zl.setContentsMargins(4, 0, 4, 0)
@@ -920,7 +979,9 @@ class MainWindow(QMainWindow):
         self.zoom_combo.textActivated.connect(self._zoom_combo)
         for w in (tb(self.a_zoom_out), self.zoom_slider, tb(self.a_zoom_in), self.zoom_combo, tb(self.a_fit_w), tb(self.a_fit_p)):
             zl.addWidget(w)
+        zw.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
         sb.addPermanentWidget(zw)
+        self.status_zoom = zw
         lw = QWidget()
         ll = QHBoxLayout(lw)
         ll.setContentsMargins(4, 0, 6, 0)
@@ -938,7 +999,9 @@ class MainWindow(QMainWindow):
             self.lang_combo.setCurrentText(saved)
         ll.addWidget(lic)
         ll.addWidget(self.lang_combo)
+        lw.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
         sb.addPermanentWidget(lw)
+        self.status_lang = lw
 
     def _build_menubar(self):
         m = QMenu(self)
@@ -1022,7 +1085,10 @@ class MainWindow(QMainWindow):
     def _check_fonts(self):
         if fontmgr.SYSTEM_FONTS.ready.is_set():
             self._font_timer.stop()
-            self.font_status.setText(f"PC 글꼴 {len(fontmgr.SYSTEM_FONTS.display_list())}개")
+            n = len(fontmgr.SYSTEM_FONTS.display_list())
+            self.font_status.setText(f"PC 글꼴 {n}개")
+            self.font_status.hide()  # 다 불러오면 숨김: 상태 표시줄 자리를 안내 글에 양보
+            self.statusBar().setToolTip(f"PC 글꼴 {n}개를 찾았습니다")
 
     def _wait_fonts(self):
         if not fontmgr.SYSTEM_FONTS.ready.is_set():
@@ -1041,6 +1107,9 @@ class MainWindow(QMainWindow):
         for a in self.tool_actions.values():
             a.setEnabled(has)
         self.side_dock.setVisible(has and self.a_panel.isChecked())
+        # 페이지 이동·확대·OCR 언어는 문서가 있을 때만 의미가 있음 → 시작 화면에서는 숨김
+        for w in (self.status_nav, self.status_zoom, self.status_lang):
+            w.setVisible(has)
         if has:
             self.a_undo.setEnabled(bool(v.pdf.undo_stack))
             self.a_redo.setEnabled(bool(v.pdf.redo_stack))
@@ -1321,6 +1390,11 @@ class MainWindow(QMainWindow):
         pm = page.get_pixmap(matrix=pymupdf.Matrix(z, z), alpha=False)
         img = QImage(pm.samples, pm.width, pm.height, pm.stride, QImage.Format_RGB888).copy()
         pm2 = QPixmap.fromImage(img)
+        # 흰 페이지가 흰 패널에 묻히지 않게 1px 테두리 (선택 안 된 쪽도 경계가 보이도록)
+        qp = QPainter(pm2)
+        qp.setPen(QColor(theme.INPUT_LINE))
+        qp.drawRect(0, 0, pm2.width() - 1, pm2.height() - 1)
+        qp.end()
         ic = QIcon()
         ic.addPixmap(pm2, QIcon.Normal)
         ic.addPixmap(pm2, QIcon.Selected)  # 선택해도 파랗게 물들지 않게

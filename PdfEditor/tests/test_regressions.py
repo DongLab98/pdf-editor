@@ -368,5 +368,59 @@ class RibbonAdaptTest(Base):
         self.assertTrue(self.w.a_ribbon_min.isChecked())
 
 
+# ----------------------------------------------------------------------------- 7. 상태 표시줄·접근성 (방향 A)
+class StatusBarAndA11yTest(Base):
+    def test_document_controls_hidden_on_start_screen(self):
+        self.w.show()
+        APP.processEvents()
+        for wd in (self.w.status_nav, self.w.status_zoom, self.w.status_lang):
+            self.assertFalse(wd.isVisible(), "시작 화면에서는 페이지 이동·확대·OCR 언어를 숨겨야 함")
+        pdf = os.path.join(self.tmp, "s.pdf")
+        _make_pdf(pdf, ["x"])
+        self.w.open_path(pdf)
+        APP.processEvents()
+        for wd in (self.w.status_nav, self.w.status_zoom, self.w.status_lang):
+            self.assertTrue(wd.isVisible())
+
+    def test_pager_does_not_split_when_message_shown(self):
+        pdf = os.path.join(self.tmp, "s.pdf")
+        _make_pdf(pdf, ["x", "y"])
+        self.w.resize(1360, 900)
+        self.w.show()
+        self.w.open_path(pdf)
+        APP.processEvents()
+        w0 = self.w.status_nav.width()
+        self.w.statusBar().showMessage("2 / 2")
+        APP.processEvents()
+        self.assertEqual(self.w.status_nav.width(), w0, "임시 메시지가 떠도 페이지 이동 묶음 폭은 그대로여야 함")
+
+    def test_long_message_is_elided_not_clipped(self):
+        self.w.resize(900, 700)
+        self.w.show()
+        APP.processEvents()
+        long = "입력 후 상자 밖을 클릭하거나 Ctrl+Enter 로 적용, Esc 로 취소합니다. " * 4
+        self.w.statusBar().showMessage(long)
+        shown = self.w.statusBar().currentMessage()
+        self.assertTrue(shown.endswith("…"), shown)
+        self.assertEqual(self.w.statusBar().toolTip(), long)
+
+    def test_focus_outline_not_removed_and_contrast_tokens(self):
+        from pdfeditor import theme
+        self.assertNotIn("outline: none", theme.STYLESHEET)
+        self.assertIn("QToolButton:focus", theme.STYLESHEET)
+
+        def lum(h):
+            c = [int(h[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+            c = [x / 12.92 if x <= 0.03928 else ((x + 0.055) / 1.055) ** 2.4 for x in c]
+            return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+
+        def cr(a, b):
+            la, lb = sorted((lum(a), lum(b)), reverse=True)
+            return (la + 0.05) / (lb + 0.05)
+        for fg, bg in ((theme.MUTED, theme.SURFACE), (theme.MUTED, theme.CANVAS_BG), (theme.PLACEHOLDER, theme.SURFACE),
+                       (theme.ACCENT, theme.CANVAS_BG), (theme.ACCENT_HOVER, theme.ACCENT_SOFT), (theme.INK, theme.SURFACE)):
+            self.assertGreaterEqual(cr(fg, bg), 4.5, f"{fg} on {bg}")
+
+
 if __name__ == "__main__":
     unittest.main()

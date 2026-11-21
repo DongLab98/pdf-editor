@@ -31,8 +31,9 @@ def main():
     from pdfeditor import theme
     theme.apply(app)
     f = QFont()
-    f.setFamilies(["Malgun Gothic", "맑은 고딕", "Segoe UI", "NanumGothic", "Noto Sans CJK KR"])
-    f.setPointSizeF(9.5 if sys.platform.startswith("win") else 9)
+    # 영문·숫자는 Windows 11 기본 글꼴(Segoe UI Variable), 한글은 맑은 고딕으로 (글자마다 앞에서부터 고름)
+    f.setFamilies(["Segoe UI Variable Text", "Segoe UI", "Malgun Gothic", "맑은 고딕", "NanumGothic", "Noto Sans CJK KR"])
+    f.setPointSizeF(9)
     app.setFont(f)
     if sys.platform.startswith("win"):
         try:

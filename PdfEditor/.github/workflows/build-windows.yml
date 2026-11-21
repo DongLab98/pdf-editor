@@ -1,0 +1,64 @@
+name: Windows 설치 파일 빌드
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 라이브러리 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: 최신 OCR 언어 데이터 받기 (실패 시 저장소 파일 사용)
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          foreach ($l in @("kor","eng")) {
+            Invoke-WebRequest "https://github.com/tesseract-ocr/tessdata_fast/raw/main/$l.traineddata" -OutFile "tessdata/$l.traineddata"
+          }
+
+      - name: 실행 파일 만들기 (PyInstaller)
+        run: pyinstaller --noconfirm --clean PdfEditor.spec
+
+      - name: 자가 진단 (텍스트 편집·글꼴·OCR·저장 확인)
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "dist\PdfEditor\PdfEditor.exe" -ArgumentList "--selftest" -Wait -PassThru
+          Get-Content "$env:TEMP\pdfeditor_selftest.txt" -Encoding UTF8
+          if ($p.ExitCode -ne 0) { throw "자가 진단 실패" }
+
+      - name: Inno Setup 설치
+        run: choco install innosetup -y --no-progress
+
+      - name: 설치 파일 만들기
+        shell: pwsh
+        run: |
+          $iscc = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+          & $iscc installer.iss
+          Compress-Archive -Path dist\PdfEditor -DestinationPath installer_output\PdfEditor_Portable.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PdfEditor-Windows
+          path: installer_output/*
+
+      - name: 릴리스에 첨부 (v* 태그일 때)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: installer_output/*

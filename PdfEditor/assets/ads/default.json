@@ -1,0 +1,9 @@
+{
+  "rotate_sec": 40,
+  "links": {
+    "blog": "https://donglab.tistory.com",
+    "download": "https://github.com/donglab98/pdf-editor/releases",
+    "source": "https://github.com/donglab98/pdf-editor"
+  },
+  "ads": []
+}
